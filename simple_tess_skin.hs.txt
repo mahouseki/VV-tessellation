@@ -1,0 +1,92 @@
+struct ControlPoint
+{
+    float4 objNormal : TEXCOORD10; // 对象空间法线
+    float4 objPos : SV_Position0; // 对象空间位置
+    float4 color1 : COLOR1;
+    float3 color0 : COLOR0;
+    float4 tex0 : TEXCOORD0;
+    float4 tex1 : TEXCOORD1;
+    float4 tex2 : TEXCOORD2;
+    float4 objTangent : TEXCOORD3; // xyz=对象空间切线 w=tangent.w handedness
+    float4 objBinormal : TEXCOORD4; // xyz=对象空间副切线（VS直传）
+    float4 viewProjRow0 : TEXCOORD6; // gViewProjection第0行
+    float4 viewProjRow1 : TEXCOORD7; // gViewProjection第1行
+    float4 viewProjRow2 : TEXCOORD8; // gViewProjection第2行
+    float4 viewProjRow3 : TEXCOORD9; // gViewProjection第3行
+    float4 viewRow0 : TEXCOORD14; // gViewMatrix第0行
+    float4 viewRow1 : TEXCOORD15; // gViewMatrix第1行
+    float4 viewRow2 : TEXCOORD16; // gViewMatrix第2行
+    float4 viewRow3 : TEXCOORD17; // gViewMatrix第3行
+    float4 skinRow0 : TEXCOORD18; // skin变换第0行（DS中用）
+    float4 skinRow1 : TEXCOORD19; // skin变换第1行
+    float4 skinRow2 : TEXCOORD20; // skin变换第2行
+    float4 skinTranslate : TEXCOORD21; // skin变换平移
+    float4 posEdgeCP1 : TEXCOORD11; // PN三角形：位置边贝塞尔控制点1（对象空间）
+    float4 posEdgeCP2 : TEXCOORD12; // PN三角形：位置边贝塞尔控制点2（对象空间）
+};
+
+struct TessFactors
+{
+    float edge[3] : SV_TessFactor;
+    float inside  : SV_InsideTessFactor;
+};
+
+float3 CalculateCubicBezierControlPoint(float3 p0, float3 p1, float3 n0) {
+    return (2.0 * p0 + p1 - dot(n0, p1 - p0) * n0) / 3.0;
+}
+
+TessFactors PatchFunc(InputPatch<ControlPoint, 3> patch)
+{
+    TessFactors f;
+    const float _TessFactor = 4.0; // 可调节：1-64
+    f.edge[0] = _TessFactor;
+    f.edge[1] = _TessFactor;
+    f.edge[2] = _TessFactor;
+    f.inside = _TessFactor;
+    return f;
+}
+
+[domain("tri")]
+[partitioning("integer")]
+[outputtopology("triangle_cw")]
+[patchconstantfunc("PatchFunc")]
+[outputcontrolpoints(3)]
+[maxtessfactor(64.0)]
+ControlPoint main(InputPatch<ControlPoint, 3> patch, uint id : SV_OutputControlPointID)
+{
+    ControlPoint output;
+    // 透传所有属性
+    output.objPos = patch[id].objPos;
+    output.color1 = patch[id].color1;
+    output.color0 = patch[id].color0;
+    output.tex0 = patch[id].tex0;
+    output.tex1 = patch[id].tex1;
+    output.tex2 = patch[id].tex2;
+    output.objTangent = patch[id].objTangent;
+    output.objNormal = patch[id].objNormal;
+    output.objBinormal = patch[id].objBinormal;
+    output.viewProjRow0 = patch[id].viewProjRow0;
+    output.viewProjRow1 = patch[id].viewProjRow1;
+    output.viewProjRow2 = patch[id].viewProjRow2;
+    output.viewProjRow3 = patch[id].viewProjRow3;
+    output.viewRow0 = patch[id].viewRow0;
+    output.viewRow1 = patch[id].viewRow1;
+    output.viewRow2 = patch[id].viewRow2;
+    output.viewRow3 = patch[id].viewRow3;
+    output.skinRow0 = patch[id].skinRow0;
+    output.skinRow1 = patch[id].skinRow1;
+    output.skinRow2 = patch[id].skinRow2;
+    output.skinTranslate = patch[id].skinTranslate;
+
+    // 在对象空间计算PN三角形位置边控制点（法线来自纯净的对象空间几何）
+    const uint adjVertexId = id < 2 ? id + 1 : 0;
+    float3 p0 = patch[id].objPos.xyz;
+    float3 p1 = patch[adjVertexId].objPos.xyz;
+    float3 n0 = patch[id].objNormal.xyz;
+    float3 n1 = patch[adjVertexId].objNormal.xyz;
+
+    output.posEdgeCP1 = float4(CalculateCubicBezierControlPoint(p0, p1, n0), 1.0);
+    output.posEdgeCP2 = float4(CalculateCubicBezierControlPoint(p1, p0, n1), 1.0);
+
+    return output;
+}

@@ -1,0 +1,374 @@
+// ---- Created with 3Dmigoto v1.4.9 on Tue Apr 28 16:29:19 2026
+
+cbuffer vector_register_block : register(b0)
+{
+  float4 gSkinSweatParameter : packoffset(c0);
+  float4 gSkinSweatDropSpecularColor : packoffset(c1);
+  float4 gSkinSweatDropIblSpecularColor : packoffset(c2);
+  float4 gSkinSweatMaterialParameter : packoffset(c3);
+  float4 gSkinSuntanColor : packoffset(c4);
+  float4 gTranslucencyLightParam : packoffset(c5);
+  float4 gWetLightColor : packoffset(c6);
+  float4 gWetLightDir : packoffset(c7);
+  float4 gSkinFlushParam : packoffset(c8);
+}
+
+cbuffer ps_default_cb : register(b2)
+{
+  float4 gHDRRate : packoffset(c0);
+  float4 gAlphaParam : packoffset(c1);
+  float4 gTexBlendAlpha[2] : packoffset(c2);
+  float4 gTexBlendScaleBias[2] : packoffset(c4);
+  float4 gNormalTexBlendAlpha : packoffset(c6);
+  float4 gNormalTexBlendScaleBias : packoffset(c7);
+  float4 gShadowCsBias : packoffset(c8);
+  float4 gIDandFresnel : packoffset(c9);
+  float4 gReflectionColor : packoffset(c10);
+  float4 gReflectionVisibilityParam : packoffset(c11);
+  float4 gEyePosition : packoffset(c12);
+  float4 gEyePlane : packoffset(c13);
+  float4 gIblDiffuseColor : packoffset(c14);
+  float4 gIblSpecularColor : packoffset(c15);
+  float4 gVelvetyRimParam : packoffset(c16);
+  float4 gSpecularColor : packoffset(c17);
+  float4 gSpecularVisibilityParam : packoffset(c18);
+  float4 gVelvetyColor : packoffset(c19);
+  float4 gRimColor : packoffset(c20);
+  float4 gLScatterHighFreq : packoffset(c21);
+  float4 gMaterialMulColor : packoffset(c22);
+  float4 gMaterialAddColor : packoffset(c23);
+  float4 gMaterialParam : packoffset(c24);
+  float4 gMaterialParam2 : packoffset(c25);
+}
+
+SamplerState gTextureSampler0_SamplerState_s : register(s0);
+SamplerState gTextureSampler1_SamplerState_s : register(s1);
+SamplerState gTextureSampler2_SamplerState_s : register(s2);
+SamplerState gTextureSampler3_SamplerState_s : register(s3);
+SamplerState gSuntanTextureSampler_SamplerState_s : register(s10);
+Texture2D<float4> gTextureSampler0_Texture : register(t0);
+Texture2D<float4> gTextureSampler1_Texture : register(t1);
+Texture3D<float4> gTextureSampler2_Texture : register(t2);
+Texture2D<float4> gTextureSampler3_Texture : register(t3);
+Texture2D<float4> gSuntanTextureSampler_Texture : register(t10);
+
+
+// 3Dmigoto declarations
+#define cmp -
+Texture1D<float4> IniParams : register(t120);
+Texture2D<float4> StereoParams : register(t125);
+
+
+void main(
+  float4 v0 : SV_Position0,
+  linear centroid float4 v1 : COLOR1,
+  linear centroid float3 v2 : COLOR0,
+  linear centroid float4 v3 : TEXCOORD0,
+  linear centroid float4 v4 : TEXCOORD1,
+  float4 v5 : TEXCOORD2,
+  linear centroid float4 v6 : TEXCOORD3,
+  linear centroid float4 v7 : TEXCOORD4,
+  linear centroid float4 v8 : TEXCOORD5,
+  uint v9 : SV_IsFrontFace0,
+  out float4 o0 : SV_Target0,
+  out float4 o1 : SV_Target1,
+  out float4 o2 : SV_Target2,
+  out float4 o3 : SV_Target3,
+  out float4 o4 : SV_Target4)
+{
+  float4 r0,r1,r2,r3;
+  uint4 bitmask, uiDest;
+  float4 fDest;
+
+  // ===========================================================================
+  // 【皮肤渲染像素着色器】—— 翻译为可读 HLSL
+  //
+  // 输入语义:
+  //   v0 = SV_Position, v1 = COLOR1 (w=shadow), v2 = COLOR0 (vertex color)
+  //   v3 = TEXCOORD0 (base UV), v4 = TEXCOORD1 (detail UV, xy=normal UV, zw=suntan/sweat UV)
+  //   v5 = TEXCOORD2 (unused)
+  //   v6 = TEXCOORD3 (view-space tangent), v7 = TEXCOORD4 (view-space binormal)
+  //   v8 = TEXCOORD5 (view-space normal), v9 = SV_IsFrontFace
+  //
+  // 输出 (5 MRT):
+  //   o0 = diffuse albedo         o3 = specular/Fresnel
+  //   o1 = view-space normal      o4 = sweat/gloss normal + wetness
+  //   o2 = flush/subsurface + opacity
+  // ===========================================================================
+
+  // === 1. 日晒 (Suntan) 颜色调制 ===
+  //   suntanMask = 1 - sample(tSuntan, detailUV.zw).r * gSkinSweatMaterialParameter.z
+  //   suntanColor = lerp(gSkinSuntanColor, white, suntanMask)
+  //   brightness = lerp(0.5, 1.0, suntanMask)
+  //   最终用作 gamma 调整的幂指数
+  r0.x = gSuntanTextureSampler_Texture.Sample(gSuntanTextureSampler_SamplerState_s, v4.zw).x;
+  r0.x = -r0.x * gSkinSweatMaterialParameter.z + 1;        // suntanMask = 1 - tex * param
+  r0.yzw = r0.xxx * gSkinSuntanColor.xyz + -gSkinSuntanColor.xyz;
+  r0.x = 1 + -r0.x;                                        // 1 - suntanMask
+  r1.xyz = gSkinSuntanColor.xyz * r0.xxx;                  // baseColor * (1-mask)
+  r1.xyz = r1.xyz * float3(0.5,0.5,0.5) + float3(1,1,1);  // lerp(0.5, 1, ...) → gamma exponent
+  r0.xyz = float3(1,1,1) + r0.yzw;                         // 1 + (mask*color - color) → target tint
+
+  // === 2. 汗珠纹理 (Sweat Drop) 混合 ===
+  //   specFactor = gSkinSweatDropSpecularColor.z * gSkinSweatParameter.x
+  //   sweatTex = sample(tSweat, baseUV.zw)  → 汗珠遮罩
+  //   blendedAlbedo = lerp(baseColor, baseColor*sweatRemoval, specFactor)
+  r0.w = gSkinSweatDropSpecularColor.z * gSkinSweatParameter.x;
+  r2.xyzw = gTextureSampler1_Texture.Sample(gTextureSampler1_SamplerState_s, v3.zw).xyzw;
+  r2.xyz = float3(1,1,1) + -r2.xyz;                       // sweatRemoval = 1 - sweatTex.rgb
+  o4.w = gSkinSweatParameter.x * r2.w;                     // output wetness to RT4.a
+  r2.xyz = -r2.xyz * r0.www + float3(1,1,1);              // lerp(1, sweatRemoval, specFactor)
+
+  // === 3. 基础颜色纹理采样和混合 ===
+  r3.xyzw = gTextureSampler0_Texture.Sample(gTextureSampler0_SamplerState_s, v3.xy).xyzw;
+  r2.xyz = r3.xyz * r2.xyz;                                // baseAlbedo * sweatBlend
+  o2.w = r3.w;                                             // opacity to RT2.a
+  r0.xyz = r2.xyz * r0.xyz;                                // albedo * suntanTint
+
+  // === 4. Gamma 校正 (log → scale → exp) ===
+  //   albedo = exp2(brightness * log2(albedo))
+  //   等价于 pow(albedo, brightness) —— 日晒 gamma 调整
+  r0.xyz = log2(r0.xyz);
+  r0.xyz = r1.xyz * r0.xyz;                                // r1 = brightness exponent
+  r0.xyz = exp2(r0.xyz);
+
+  // === 5. 皮肤泛红 (Flush/Blush) ===
+  //   flushColor = gSkinFlushParam * sample(tFlush).a
+  //   叠加到 albedo
+  r1.xyzw = gTextureSampler3_Texture.Sample(gTextureSampler3_SamplerState_s, v4.zw).xyzw;
+  r2.xyz = gSkinFlushParam.xyz * r1.www;                   // flush = param * flushTexture.a
+  o2.xyz = r1.xyz;                                         // flush/subsurface → RT2.rgb
+  r1.xyz = r2.xyz * gSkinSweatMaterialParameter.www + float3(1,1,1);  // lerp(1, flush, param.w)
+  r0.xyz = r1.xyz * r0.xyz;                                // albedo *= flush
+
+  // === 6. 材质颜色调整 ===
+  r0.xyz = r0.xyz * gMaterialMulColor.xyz + gMaterialAddColor.xyz;
+  o0.xyz = v2.xyz * r0.xyz;                                // diffuse = vertexColor * albedo
+
+  // === 7. 混合/透明度 ===
+  r0.x = v9.x ? 1 : -1;                                    // frontFace: +1 or -1
+  o0.w = saturate(v1.w * r0.x);                            // alpha = saturate(shadow * face)
+
+  // === 8. 法线贴图 #1 (gSkinSweatParameter.z 层) → RT1 ===
+  //   从 tNormalMap 采样法线，用 view-space TBN (v6/v7/v8*frontFace) 变换到视图空间
+  r0.xyz = v8.xyz * r0.xxx;                                // viewNormal *= faceDirection
+  r1.xy = v4.xy;
+  r1.z = gSkinSweatParameter.z;
+  r1.xyz = gTextureSampler2_Texture.Sample(gTextureSampler2_SamplerState_s, r1.xyz).xyz;
+  r1.xyz = r1.xyz * float3(2,2,2) + float3(-1,-1,-1);     // decode [0,1] → [-1,1]
+  // TBN 变换: viewSpaceNormal = nm.x*tangent + nm.y*binormal + nm.z*viewNormal
+  r2.xyz = v7.xyz * r1.yyy;                                // binormal * nm.y
+  r1.xyw = r1.xxx * v6.xyz + r2.xyz;                       // tangent * nm.x + above
+  r1.xyz = r1.zzz * r0.xyz + r1.xyw;                       // viewNormal*face * nm.z + above
+  r0.w = cmp(gMaterialParam2.y != 0.000000);
+  r1.xyz = r0.www ? -r1.xyz : r1.xyz;                      // 可选法线翻转
+  r0.w = dot(r1.xyz, r1.xyz);
+  r0.w = rsqrt(r0.w);
+  o1.xyz = r1.xyz * r0.www;                                // normalize → RT1.rgb (view-space normal)
+  o1.w = gShadowCsBias.z;                                  // RT1.a = shadow bias
+
+  // === 9. RT3: 常量数据 ===
+  o3.xyz = gIDandFresnel.xyw;
+  o3.w = gMaterialMulColor.w;
+
+  // === 10. 法线贴图 #2 (gSkinSweatParameter.w 层) → RT4 ===
+  //    第二张法线贴图（不同参数），用于细节法线/汗珠光泽
+  r1.xy = v4.xy;
+  r1.z = gSkinSweatParameter.w;
+  r1.xyz = gTextureSampler2_Texture.Sample(gTextureSampler2_SamplerState_s, r1.xyz).xyz;
+  r1.xyz = r1.xyz * float3(2,2,2) + float3(-1,-1,-1);
+  r2.xyz = v7.xyz * r1.yyy;
+  r1.xyw = r1.xxx * v6.xyz + r2.xyz;
+  r0.xyz = r1.zzz * r0.xyz + r1.xyw;
+  r0.w = dot(r0.xyz, r0.xyz);
+  r0.w = rsqrt(r0.w);
+  o4.xyz = r0.xyz * r0.www;                                // normalize → RT4.rgb
+  return;
+}
+
+/*~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+//
+// Generated by Microsoft (R) HLSL Shader Compiler 6.3.9600.16384
+//
+//   using 3Dmigoto v1.4.9 on Tue Apr 28 16:29:19 2026
+//
+//
+// Buffer Definitions:
+//
+// cbuffer vector_register_block
+// {
+//
+//   float4 gSkinSweatParameter;        // Offset:    0 Size:    16
+//   float4 gSkinSweatDropSpecularColor;// Offset:   16 Size:    16
+//   float4 gSkinSweatDropIblSpecularColor;// Offset:   32 Size:    16 [unused]
+//   float4 gSkinSweatMaterialParameter;// Offset:   48 Size:    16
+//   float4 gSkinSuntanColor;           // Offset:   64 Size:    16
+//   float4 gTranslucencyLightParam;    // Offset:   80 Size:    16 [unused]
+//   float4 gWetLightColor;             // Offset:   96 Size:    16 [unused]
+//   float4 gWetLightDir;               // Offset:  112 Size:    16 [unused]
+//   float4 gSkinFlushParam;            // Offset:  128 Size:    16
+//
+// }
+//
+// cbuffer ps_default_cb
+// {
+//
+//   float4 gHDRRate;                   // Offset:    0 Size:    16 [unused]
+//   float4 gAlphaParam;                // Offset:   16 Size:    16 [unused]
+//   float4 gTexBlendAlpha[2];          // Offset:   32 Size:    32 [unused]
+//   float4 gTexBlendScaleBias[2];      // Offset:   64 Size:    32 [unused]
+//   float4 gNormalTexBlendAlpha;       // Offset:   96 Size:    16 [unused]
+//   float4 gNormalTexBlendScaleBias;   // Offset:  112 Size:    16 [unused]
+//   float4 gShadowCsBias;              // Offset:  128 Size:    16
+//   float4 gIDandFresnel;              // Offset:  144 Size:    16
+//   float4 gReflectionColor;           // Offset:  160 Size:    16 [unused]
+//   float4 gReflectionVisibilityParam; // Offset:  176 Size:    16 [unused]
+//   float4 gEyePosition;               // Offset:  192 Size:    16 [unused]
+//   float4 gEyePlane;                  // Offset:  208 Size:    16 [unused]
+//   float4 gIblDiffuseColor;           // Offset:  224 Size:    16 [unused]
+//   float4 gIblSpecularColor;          // Offset:  240 Size:    16 [unused]
+//   float4 gVelvetyRimParam;           // Offset:  256 Size:    16 [unused]
+//   float4 gSpecularColor;             // Offset:  272 Size:    16 [unused]
+//   float4 gSpecularVisibilityParam;   // Offset:  288 Size:    16 [unused]
+//   float4 gVelvetyColor;              // Offset:  304 Size:    16 [unused]
+//   float4 gRimColor;                  // Offset:  320 Size:    16 [unused]
+//   float4 gLScatterHighFreq;          // Offset:  336 Size:    16 [unused]
+//   float4 gMaterialMulColor;          // Offset:  352 Size:    16
+//   float4 gMaterialAddColor;          // Offset:  368 Size:    16
+//   float4 gMaterialParam;             // Offset:  384 Size:    16 [unused]
+//   float4 gMaterialParam2;            // Offset:  400 Size:    16
+//
+// }
+//
+//
+// Resource Bindings:
+//
+// Name                                 Type  Format         Dim Slot Elements
+// ------------------------------ ---------- ------- ----------- ---- --------
+// gTextureSampler0_SamplerState     sampler      NA          NA    0        1
+// gTextureSampler1_SamplerState     sampler      NA          NA    1        1
+// gTextureSampler2_SamplerState     sampler      NA          NA    2        1
+// gTextureSampler3_SamplerState     sampler      NA          NA    3        1
+// gSuntanTextureSampler_SamplerState    sampler      NA          NA   10        1
+// gTextureSampler0_Texture          texture  float4          2d    0        1
+// gTextureSampler1_Texture          texture  float4          2d    1        1
+// gTextureSampler2_Texture          texture  float4          3d    2        1
+// gTextureSampler3_Texture          texture  float4          2d    3        1
+// gSuntanTextureSampler_Texture     texture  float4          2d   10        1
+// vector_register_block             cbuffer      NA          NA    0        1
+// ps_default_cb                     cbuffer      NA          NA    2        1
+//
+//
+//
+// Input signature:
+//
+// Name                 Index   Mask Register SysValue  Format   Used
+// -------------------- ----- ------ -------- -------- ------- ------
+// SV_Position              0   xyzw        0      POS   float
+// COLOR                    1   xyzw        1     NONE   float      w
+// COLOR                    0   xyz         2     NONE   float   xyz
+// TEXCOORD                 0   xyzw        3     NONE   float   xyzw
+// TEXCOORD                 1   xyzw        4     NONE   float   xyzw
+// TEXCOORD                 2   xyzw        5     NONE   float
+// TEXCOORD                 3   xyzw        6     NONE   float   xyz
+// TEXCOORD                 4   xyzw        7     NONE   float   xyz
+// TEXCOORD                 5   xyzw        8     NONE   float   xyz
+// SV_IsFrontFace           0   x           9    FFACE    uint   x
+//
+//
+// Output signature:
+//
+// Name                 Index   Mask Register SysValue  Format   Used
+// -------------------- ----- ------ -------- -------- ------- ------
+// SV_Target                0   xyzw        0   TARGET   float   xyzw
+// SV_Target                1   xyzw        1   TARGET   float   xyzw
+// SV_Target                2   xyzw        2   TARGET   float   xyzw
+// SV_Target                3   xyzw        3   TARGET   float   xyzw
+// SV_Target                4   xyzw        4   TARGET   float   xyzw
+//
+ps_5_0
+dcl_globalFlags refactoringAllowed
+dcl_constantbuffer CB0[9], immediateIndexed
+dcl_constantbuffer CB2[26], immediateIndexed
+dcl_sampler s0, mode_default
+dcl_sampler s1, mode_default
+dcl_sampler s2, mode_default
+dcl_sampler s3, mode_default
+dcl_sampler s10, mode_default
+dcl_resource_texture2d (float,float,float,float) t0
+dcl_resource_texture2d (float,float,float,float) t1
+dcl_resource_texture3d (float,float,float,float) t2
+dcl_resource_texture2d (float,float,float,float) t3
+dcl_resource_texture2d (float,float,float,float) t10
+dcl_input_ps linear centroid v1.w
+dcl_input_ps linear centroid v2.xyz
+dcl_input_ps linear centroid v3.xyzw
+dcl_input_ps linear centroid v4.xyzw
+dcl_input_ps linear centroid v6.xyz
+dcl_input_ps linear centroid v7.xyz
+dcl_input_ps linear centroid v8.xyz
+dcl_input_ps_sgv constant v9.x, is_front_face
+dcl_output o0.xyzw
+dcl_output o1.xyzw
+dcl_output o2.xyzw
+dcl_output o3.xyzw
+dcl_output o4.xyzw
+dcl_temps 4
+sample_indexable(texture2d)(float,float,float,float) r0.x, v4.zwzz, t10.xyzw, s10
+mad r0.x, -r0.x, cb0[3].z, l(1.000000)
+mad r0.yzw, r0.xxxx, cb0[4].xxyz, -cb0[4].xxyz
+add r0.x, -r0.x, l(1.000000)
+mul r1.xyz, r0.xxxx, cb0[4].xyzx
+mad r1.xyz, r1.xyzx, l(0.500000, 0.500000, 0.500000, 0.000000), l(1.000000, 1.000000, 1.000000, 0.000000)
+add r0.xyz, r0.yzwy, l(1.000000, 1.000000, 1.000000, 0.000000)
+mul r0.w, cb0[0].x, cb0[1].z
+sample_indexable(texture2d)(float,float,float,float) r2.xyzw, v3.zwzz, t1.xyzw, s1
+add r2.xyz, -r2.xyzx, l(1.000000, 1.000000, 1.000000, 0.000000)
+mul o4.w, r2.w, cb0[0].x
+mad r2.xyz, -r2.xyzx, r0.wwww, l(1.000000, 1.000000, 1.000000, 0.000000)
+sample_indexable(texture2d)(float,float,float,float) r3.xyzw, v3.xyxx, t0.xyzw, s0
+mul r2.xyz, r2.xyzx, r3.xyzx
+mov o2.w, r3.w
+mul r0.xyz, r0.xyzx, r2.xyzx
+log r0.xyz, r0.xyzx
+mul r0.xyz, r0.xyzx, r1.xyzx
+exp r0.xyz, r0.xyzx
+sample_indexable(texture2d)(float,float,float,float) r1.xyzw, v4.zwzz, t3.xyzw, s3
+mul r2.xyz, r1.wwww, cb0[8].xyzx
+mov o2.xyz, r1.xyzx
+mad r1.xyz, r2.xyzx, cb0[3].wwww, l(1.000000, 1.000000, 1.000000, 0.000000)
+mul r0.xyz, r0.xyzx, r1.xyzx
+mad r0.xyz, r0.xyzx, cb2[22].xyzx, cb2[23].xyzx
+mul o0.xyz, r0.xyzx, v2.xyzx
+movc r0.x, v9.x, l(1.000000), l(-1.000000)
+mul_sat o0.w, r0.x, v1.w
+mul r0.xyz, r0.xxxx, v8.xyzx
+mov r1.xy, v4.xyxx
+mov r1.z, cb0[0].z
+sample_indexable(texture3d)(float,float,float,float) r1.xyz, r1.xyzx, t2.xyzw, s2
+mad r1.xyz, r1.xyzx, l(2.000000, 2.000000, 2.000000, 0.000000), l(-1.000000, -1.000000, -1.000000, 0.000000)
+mul r2.xyz, r1.yyyy, v7.xyzx
+mad r1.xyw, r1.xxxx, v6.xyxz, r2.xyxz
+mad r1.xyz, r1.zzzz, r0.xyzx, r1.xywx
+ne r0.w, cb2[25].y, l(0.000000)
+movc r1.xyz, r0.wwww, -r1.xyzx, r1.xyzx
+dp3 r0.w, r1.xyzx, r1.xyzx
+rsq r0.w, r0.w
+mul o1.xyz, r0.wwww, r1.xyzx
+mov o1.w, cb2[8].z
+mov o3.xyz, cb2[9].xywx
+mov o3.w, cb2[22].w
+mov r1.xy, v4.xyxx
+mov r1.z, cb0[0].w
+sample_indexable(texture3d)(float,float,float,float) r1.xyz, r1.xyzx, t2.xyzw, s2
+mad r1.xyz, r1.xyzx, l(2.000000, 2.000000, 2.000000, 0.000000), l(-1.000000, -1.000000, -1.000000, 0.000000)
+mul r2.xyz, r1.yyyy, v7.xyzx
+mad r1.xyw, r1.xxxx, v6.xyxz, r2.xyxz
+mad r0.xyz, r1.zzzz, r0.xyzx, r1.xywx
+dp3 r0.w, r0.xyzx, r0.xyzx
+rsq r0.w, r0.w
+mul o4.xyz, r0.wwww, r0.xyzx
+ret
+// Approximately 55 instruction slots used
+
+//~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~*/

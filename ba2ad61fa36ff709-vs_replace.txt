@@ -1,0 +1,356 @@
+// ---- Created with 3Dmigoto v1.4.9 on Wed Apr 15 19:30:04 2026
+// 【对象空间版】VS输出对象空间位置/法线/切线/副切线 + skin变换矩阵 + 投影/视图矩阵行
+// PN-Triangle 在对象空间计算，DS 末段用 skin 矩阵变换到世界空间，避免蒙皮扭曲法线
+cbuffer bool_register_block : register(b1)
+{
+  bool gUseMultiUV : packoffset(c0);
+  bool gPointLightEnable0 : packoffset(c0.y);
+  bool gPointLightEnable1 : packoffset(c0.z);
+  bool gPointLightEnable2 : packoffset(c0.w);
+  bool gPointLightEnable3 : packoffset(c1);
+  bool gEnvMappingEnable : packoffset(c1.y);
+  bool gShadowEnable : packoffset(c1.z);
+  bool gLightScatterEnable : packoffset(c1.w);
+  bool gFogEnable : packoffset(c2);
+  bool gVertexBlendEnable2 : packoffset(c2.z);
+  bool gVertexBlendEnable3 : packoffset(c2.w);
+  bool gVertexBlendEnable4 : packoffset(c3);
+  bool gUseInputVertexColor : packoffset(c3.y);
+  int2 bool_register_block_padding : packoffset(c3.z);
+}
+cbuffer model_high_frequency_block : register(b7)
+{
+  row_major float4x4 gStaticTransformMatrix : packoffset(c0);
+  float4 gUVOffset0 : packoffset(c4);
+  float4 gUVOffset1 : packoffset(c5);
+  float4 gUVOffset2 : packoffset(c6);
+  float4 gShadowVector : packoffset(c7);
+  float4 gShadowOffset : packoffset(c8);
+}
+cbuffer model_low_frequency_block : register(b9)
+{
+  row_major float4x4 gViewProjection : packoffset(c0);
+  float4 gEyePosition : packoffset(c4);
+  row_major float4x4 gViewMatrix : packoffset(c5);
+  row_major float4x4 gShadowMatrix : packoffset(c9);
+  float4 gClipPlane0 : packoffset(c13);
+  float4 gFogMiddle : packoffset(c14);
+  float4 gFogFarMiddle : packoffset(c15);
+  float4 gFogDistance : packoffset(c16);
+  float4 gFogDensity : packoffset(c17);
+  float4 gHeightFogMiddle : packoffset(c18);
+  float4 gHeightFogFarMiddle : packoffset(c19);
+  float4 gHeightFogDistance : packoffset(c20);
+  float4 gHeightFogDensity : packoffset(c21);
+  row_major float4x4 gSecondShadowMatrix : packoffset(c22);
+}
+cbuffer skinning_matrix_block : register(b2)
+{
+  row_major float3x4 gSkinningMatrices[256] : packoffset(c0);
+}
+// 3Dmigoto declarations
+#define cmp -
+Texture1D<float4> IniParams : register(t120);
+Texture2D<float4> StereoParams : register(t125);
+void main(
+  float4 position : POSITION0,
+  float4 color : COLOR0,
+  float4 uv0 : TEXCOORD0,
+  float4 uv1 : TEXCOORD1,
+  float4 uv2 : TEXCOORD2,
+  float3 normal : NORMAL0,
+  float4 tangent : TANGENT0,
+  float4 blendWeight0 : BLENDWEIGHT0,
+  float4 blendWeight1 : BLENDWEIGHT1,
+  float4 blendWeight2 : BLENDWEIGHT2,
+  uint4 blendIndex0 : BLENDINDICES0,
+  uint4 blendIndex1 : BLENDINDICES1,
+  uint4 blendIndex2 : BLENDINDICES2,
+  // 【输出签名】对象空间TBN + skin变换矩阵 + 投影/视图矩阵行
+  out float4 outObjNormal    : TEXCOORD10, // 对象空间法线
+  out float4 outObjPos       : SV_Position0, // 对象空间位置
+  out float4 outColor1       : COLOR1,
+  out float3 outColor0       : COLOR0,
+  out float4 outUV0          : TEXCOORD0,
+  out float4 outUV1          : TEXCOORD1,
+  out float4 outUV2          : TEXCOORD2,
+  out float4 outObjTangent   : TEXCOORD3, // xyz=对象空间切线, w=tangent.w handedness
+  out float4 outObjBinormal  : TEXCOORD4, // xyz=对象空间副切线
+  out float4 outViewProjRow0 : TEXCOORD6, // gViewProjection[0]
+  out float4 outViewProjRow1 : TEXCOORD7, // gViewProjection[1]
+  out float4 outViewProjRow2 : TEXCOORD8, // gViewProjection[2]
+  out float4 outViewProjRow3 : TEXCOORD9, // gViewProjection[3]
+  out float4 outViewRow0     : TEXCOORD14, // gViewMatrix[0]
+  out float4 outViewRow1     : TEXCOORD15, // gViewMatrix[1]
+  out float4 outViewRow2     : TEXCOORD16, // gViewMatrix[2]
+  out float4 outViewRow3     : TEXCOORD17, // gViewMatrix[3]
+  out float4 outSkinRow0     : TEXCOORD18, // skin变换第0行（蒙皮=skin3x3 row0, 静态=gStaticTransform[0]）
+  out float4 outSkinRow1     : TEXCOORD19, // skin变换第1行
+  out float4 outSkinRow2     : TEXCOORD20, // skin变换第2行
+  out float4 outSkinTranslate : TEXCOORD21) // skin变换平移（蒙皮=base+delta, 静态=gStaticTransform[3]）
+{
+  const float4 icb[] = { { 1.000000, 0, 0, 0},
+                              { 0, 1.000000, 0, 0},
+                              { 0, 0, 1.000000, 0},
+                              { 0, 0, 0, 1.000000} };
+  float4 r0,r1,r2,r3,r4,r5,r6,r7,r8,r9,r10;
+  uint4 bitmask, uiDest;
+  float4 fDest;
+  // ===========================================================================
+  // 【蒙皮路径】最多 3 组 × 4 骨骼 = 12 骨骼/顶点
+  //
+  // 算法：对每组 (blendWeightN, blendIndexN)，循环 4 次：
+  //   1. 从 packed uint4 blendIndex 中逐位解码出第 i 个骨骼索引
+  //   2. 用 dot(blendWeight.yzw, icb[i].xyz) 取出对应 blend weight
+  //   3. 累加: skin3x3 += bone3x3 * weight
+  //            transDelta += (boneTrans - baseTrans) * weight
+  // 最终: worldPos = skin3x3 * position + (baseTrans + transDelta)
+  //       worldNormal = skin3x3 * normal   (只取旋转部分)
+  //       worldTangent = skin3x3 * tangent
+  // 对象空间 TBN 已在各分支中直接输出，不再需要 worldTangent/worldBinormal 变量
+  // ===========================================================================
+  // [r4/r5/r6] = 累加的 3x3 蒙皮矩阵行
+  // [r7]       = 累加的平移增量 (translation delta)
+  // [r8.x]     = 循环计数器
+  // [r9]       = 位掩码，用于从 packed uint4 中提取骨骼索引
+  // [r10]      = 临时
+  // ===========================================================================
+  if (gVertexBlendEnable2 != 0) {
+    // ---- 第1组：blendWeight0/blendIndex0（4个骨骼） ----
+    r0.x = (int)blendIndex0.x * 3;                        // baseBoneIndex * 3（每个骨骼3行float3x4）
+    r0.yzw = gSkinningMatrices[blendIndex0.x]._m00_m01_m02 * blendWeight0.xxx;
+    r1.x = 0;
+    r1.yzw = gSkinningMatrices[blendIndex0.x]._m10_m11_m12 * blendWeight0.xxx;
+    r2.xyz = gSkinningMatrices[blendIndex0.x]._m20_m21_m22 * blendWeight0.xxx;
+    r3.w = 0;
+    r4.xyz = r0.yzw;
+    r5.xyz = r1.yzw;
+    r6.xyz = r2.xyz;
+    r7.xyz = r1.xxx;
+    r8.x = 1;
+    while (true) {
+      r2.w = cmp((int)r8.x >= 4);
+      if (r2.w != 0) break;
+      r8.xyz = (int3)r8.xxx + int3(1,-1,-4);
+      r2.w = -(int)r8.y;
+      r9.xy = cmp((uint2)r8.yy < uint2(1,2));
+      r9.z = r9.y ? r2.w : 0;
+      r9.w = r9.y ? 0 : r8.z;
+      r3.xyz = r9.xzw ? blendIndex0.yzw : 0;
+      r3.xy = (int2)r3.yw | (int2)r3.xz;
+      r2.w = (int)r3.y | (int)r3.x;
+      r2.w = (int)r2.w * 3;
+      r3.x = gSkinningMatrices[r2.w/3]._m03 + -gSkinningMatrices[blendIndex0.x]._m03;
+      r3.y = gSkinningMatrices[r2.w/3]._m13 + -gSkinningMatrices[blendIndex0.x]._m13;
+      r3.z = gSkinningMatrices[r2.w/3]._m23 + -gSkinningMatrices[blendIndex0.x]._m23;
+      r4.w = dot(blendWeight0.yzw, icb[r8.y+0].xyz);
+      r4.xyz = gSkinningMatrices[r2.w/3]._m00_m01_m02 * r4.www + r4.xyz;
+      r5.xyz = gSkinningMatrices[r2.w/3]._m10_m11_m12 * r4.www + r5.xyz;
+      r6.xyz = gSkinningMatrices[r2.w/3]._m20_m21_m22 * r4.www + r6.xyz;
+      r7.xyz = r3.xyz * r4.www + r7.xyz;
+    }
+    r0.y = cmp(0 < blendWeight1.x);
+    if (r0.y != 0) {
+      r0.yzw = r4.xyz;
+      r1.xyz = r5.xyz;
+      r2.xyz = r6.xyz;
+      r3.xyz = r7.xyz;
+      r1.w = 0;
+      while (true) {
+        r2.w = cmp((int)r1.w >= 4);
+        if (r2.w != 0) break;
+        r2.w = -(int)r1.w;
+        r8.xyz = cmp((uint3)r1.www < uint3(1,2,3));
+        r9.y = r8.y ? r2.w : 0;
+        r10.xy = (int2)r1.ww + int2(-3,1);
+        r9.z = r8.y ? 0 : r10.x;
+        r9.w = cmp((int)r8.z == 0);
+        r9.x = r8.x;
+        r8.xyzw = r9.xyzw ? blendIndex1.xyzw : 0;
+        r8.xy = (int2)r8.yw | (int2)r8.xz;
+        r2.w = (int)r8.y | (int)r8.x;
+        r2.w = (int)r2.w * 3;
+        r8.x = gSkinningMatrices[r2.w/3]._m03 + -gSkinningMatrices[blendIndex0.x]._m03;
+        r8.y = gSkinningMatrices[r2.w/3]._m13 + -gSkinningMatrices[blendIndex0.x]._m13;
+        r8.z = gSkinningMatrices[r2.w/3]._m23 + -gSkinningMatrices[blendIndex0.x]._m23;
+        r3.w = dot(blendWeight1.xyzw, icb[r1.w+0].xyzw);
+        r0.yzw = gSkinningMatrices[r2.w/3]._m00_m01_m02 * r3.www + r0.yzw;
+        r1.xyz = gSkinningMatrices[r2.w/3]._m10_m11_m12 * r3.www + r1.xyz;
+        r2.xyz = gSkinningMatrices[r2.w/3]._m20_m21_m22 * r3.www + r2.xyz;
+        r3.xyz = r8.xyz * r3.www + r3.xyz;
+        r1.w = r10.y;
+      }
+      r4.xyz = r0.yzw;
+      r5.xyz = r1.xyz;
+      r6.xyz = r2.xyz;
+      r7.xyz = r3.xyz;
+      r0.y = cmp(0 < blendWeight2.x);
+      if (r0.y != 0) {
+        r0.yzw = r4.xyz;
+        r1.xyz = r5.xyz;
+        r2.xyz = r6.xyz;
+        r3.xyz = r7.xyz;
+        r1.w = 0;
+        while (true) {
+          r2.w = cmp((int)r1.w >= 4);
+          if (r2.w != 0) break;
+          r2.w = -(int)r1.w;
+          r8.xyz = cmp((uint3)r1.www < uint3(1,2,3));
+          r9.y = r8.y ? r2.w : 0;
+          r10.xy = (int2)r1.ww + int2(-3,1);
+          r9.z = r8.y ? 0 : r10.x;
+          r9.w = cmp((int)r8.z == 0);
+          r9.x = r8.x;
+          r8.xyzw = r9.xyzw ? blendIndex2.xyzw : 0;
+          r8.xy = (int2)r8.yw | (int2)r8.xz;
+          r2.w = (int)r8.y | (int)r8.x;
+          r2.w = (int)r2.w * 3;
+          r8.x = gSkinningMatrices[r2.w/3]._m03 + -gSkinningMatrices[blendIndex0.x]._m03;
+          r8.y = gSkinningMatrices[r2.w/3]._m13 + -gSkinningMatrices[blendIndex0.x]._m13;
+          r8.z = gSkinningMatrices[r2.w/3]._m23 + -gSkinningMatrices[blendIndex0.x]._m23;
+          r3.w = dot(blendWeight2.xyzw, icb[r1.w+0].xyzw);
+          r0.yzw = gSkinningMatrices[r2.w/3]._m00_m01_m02 * r3.www + r0.yzw;
+          r1.xyz = gSkinningMatrices[r2.w/3]._m10_m11_m12 * r3.www + r1.xyz;
+          r2.xyz = gSkinningMatrices[r2.w/3]._m20_m21_m22 * r3.www + r2.xyz;
+          r3.xyz = r8.xyz * r3.www + r3.xyz;
+          r1.w = r10.y;
+        }
+        r4.xyz = r0.yzw;
+        r5.xyz = r1.xyz;
+        r6.xyz = r2.xyz;
+        r7.xyz = r3.xyz;
+      }
+    }
+    r0.y = dot(position.xyz, r4.xyz);
+    r1.x = r0.y + r7.x;
+    r0.y = dot(position.xyz, r5.xyz);
+    r1.y = r0.y + r7.y;
+    r0.y = dot(position.xyz, r6.xyz);
+    r1.z = r0.y + r7.z;
+    r2.x = gSkinningMatrices[blendIndex0.x]._m03;
+    r2.y = gSkinningMatrices[blendIndex0.x]._m13;
+    r2.z = gSkinningMatrices[blendIndex0.x]._m23;
+    r0.xyw = r2.xyz + r1.xyz;
+    // ---- 蒙皮后位置/法线用于shadow dot ----
+    // worldPos = skin3x3 * position + (baseTranslation + transDelta)
+    // r1.xyz = skin3x3 * position, r2.xyz = baseTranslation
+    float3 skinTranslate_sk = r2.xyz + r7.xyz; // base + deltas
+
+    // === 输出对象空间位置/法线/切线/副切线（PN-Triangle 在对象空间计算） ===
+    outObjPos = float4(position.xyz, 1.0);
+    outObjNormal = float4(normalize(normal), 1.0);
+    outObjTangent = float4(normalize(tangent.xyz), tangent.w);
+    outObjBinormal = float4(cross(normalize(tangent.xyz), normalize(normal)) * tangent.w, 1.0);
+
+    // === 输出 skin 变换矩阵（DS 中用于对象空间→世界空间） ===
+    outSkinRow0 = float4(r4.xyz, 0);
+    outSkinRow1 = float4(r5.xyz, 0);
+    outSkinRow2 = float4(r6.xyz, 0);
+    outSkinTranslate = float4(skinTranslate_sk, 0);
+
+    // 计算世界空间法线用于 shadow dot（保留 r1 给公共尾部）
+    r1.x = dot(r4.xyz, normal.xyz);
+    r1.y = dot(r5.xyz, normal.xyz);
+    r1.z = dot(r6.xyz, normal.xyz);
+    r1.xyz = float3(9.99999975e-06,0,0) + r1.xyz;
+    r1.w = dot(r1.xyz, r1.xyz);
+    r1.w = rsqrt(r1.w);
+    r1.xyz = r1.yzx * r1.www; // swizzled for shadow dot
+
+    // 传递 gViewProjection / gViewMatrix 矩阵行
+    outViewProjRow0 = gViewProjection[0];
+    outViewProjRow1 = gViewProjection[1];
+    outViewProjRow2 = gViewProjection[2];
+    outViewProjRow3 = gViewProjection[3];
+    outViewRow0 = gViewMatrix[0];
+    outViewRow1 = gViewMatrix[1];
+    outViewRow2 = gViewMatrix[2];
+    outViewRow3 = gViewMatrix[3];
+    // 计算世界空间切线（为保留原始swizzle给公共尾部）
+    r2.x = dot(r4.xyz, tangent.xyz);
+    r2.y = dot(r5.xyz, tangent.xyz);
+    r2.z = dot(r6.xyz, tangent.xyz);
+    r2.xyz = float3(9.99999975e-06,0,0) + r2.xyz;
+    r1.w = dot(r2.xyz, r2.xyz);
+    r1.w = rsqrt(r1.w);
+    r2.xyz = r2.zxy * r1.www;
+    r3.w = r0.x;
+    r4.w = r0.y;
+
+  // =========================================================================
+  // 【静态模型路径】无蒙皮，直接使用 gStaticTransformMatrix
+  //   worldPos    = mul(gStaticTransformMatrix, float4(pos, 1))
+  //   worldNormal = mul((float3x3)gStaticTransformMatrix, normal) 归一化
+  //   worldTangent = mul((float3x3)gStaticTransformMatrix, tangent) 归一化+swizzle
+  // =========================================================================
+  } else {
+    // worldPos = row0*pos.x + row1*pos.y + row2*pos.z + row3 (1.0 implied)
+    r5.xyz = gStaticTransformMatrix._m10_m11_m12 * position.yyy;
+    r5.xyz = position.xxx * gStaticTransformMatrix._m00_m01_m02 + r5.xyz;
+    r5.xyz = position.zzz * gStaticTransformMatrix._m20_m21_m22 + r5.xyz;
+    r0.xyw = gStaticTransformMatrix._m30_m31_m32 + r5.xyz;
+    // ==============================================
+    // 【静态模型】输出对象空间位置/法线/切线 + gStaticTransformMatrix
+    // ==============================================
+    outObjPos = float4(position.xyz, 1.0);
+    outObjNormal = float4(normalize(normal), 1.0);
+    outObjTangent = float4(normalize(tangent.xyz), tangent.w);
+    outObjBinormal = float4(cross(normalize(tangent.xyz), normalize(normal)) * tangent.w, 1.0);
+
+    // skin变换 = gStaticTransformMatrix（DS中对所有细分顶点一致应用）
+    outSkinRow0 = float4(gStaticTransformMatrix._m00_m01_m02, 0);
+    outSkinRow1 = float4(gStaticTransformMatrix._m10_m11_m12, 0);
+    outSkinRow2 = float4(gStaticTransformMatrix._m20_m21_m22, 0);
+    outSkinTranslate = float4(gStaticTransformMatrix._m30_m31_m32, 0);
+
+    // 计算世界空间法线用于 shadow dot
+    r5.xyz = gStaticTransformMatrix._m10_m11_m12 * normal.yyy;
+    r5.xyz = normal.xxx * gStaticTransformMatrix._m00_m01_m02 + r5.xyz;
+    r5.xyz = normal.zzz * gStaticTransformMatrix._m20_m21_m22 + r5.xyz;
+    r5.xyz = float3(9.99999975e-06,0,0) + r5.xyz;
+    r1.w = dot(r5.xyz, r5.xyz);
+    r1.w = rsqrt(r1.w);
+    r1.xyz = r5.yzx * r1.www; // swizzled for shadow dot
+
+    // 传递 gViewProjection / gViewMatrix 矩阵行
+    outViewProjRow0 = gViewProjection[0];
+    outViewProjRow1 = gViewProjection[1];
+    outViewProjRow2 = gViewProjection[2];
+    outViewProjRow3 = gViewProjection[3];
+    outViewRow0 = gViewMatrix[0];
+    outViewRow1 = gViewMatrix[1];
+    outViewRow2 = gViewMatrix[2];
+    outViewRow3 = gViewMatrix[3];
+    // 计算世界空间切线（为保留原始swizzle给公共尾部）
+    r5.xyz = gStaticTransformMatrix._m10_m11_m12 * tangent.yyy;
+    r5.xyz = tangent.xxx * gStaticTransformMatrix._m00_m01_m02 + r5.xyz;
+    r5.xyz = tangent.zzz * gStaticTransformMatrix._m20_m21_m22 + r5.xyz;
+    r5.xyz = float3(9.99999975e-06,0,0) + r5.xyz;
+    r1.w = dot(r5.xyz, r5.xyz);
+    r1.w = rsqrt(r1.w);
+    r2.xyz = r5.zxy * r1.www;
+    r3.w = position.x;
+    r4.w = position.y;
+  }
+
+  // ===========================================================================
+  // 【公共尾部】UV/颜色输出 + 传递世界空间切线
+  //
+  // UV: offsetUV = inputUV + gUVOffset, 如果 !gUseMultiUV 则回退到 uv0
+  // 颜色: outColor0 = vertexColor 或 (1,1,1)
+  //       outColor1.w = dot(swizzledNormal, gShadowVector)  阴影投影
+  // TEXCOORD3: xyz=世界空间切线, w=tangent.w (handedness)
+  // ===========================================================================
+  // UV 偏移
+  r2.xyzw = gUVOffset0.xyzw + uv0.xyzw;
+  r5.xyzw = gUVOffset1.xyzw + uv1.xyzw;
+  r6.xyzw = gUVOffset2.xyzw + uv2.xyzw;
+  outUV0.xyzw = gUseMultiUV ? r2.xyzw : r2.xyxy;
+  outUV1.xyzw = gUseMultiUV ? r5.xyzw : r2.xyxy;
+  outUV2.xyzw = gUseMultiUV ? r6.xyzw : r2.xyxy;
+  outColor0.xyz = gUseInputVertexColor ? color.xyz : float3(1,1,1);
+  outColor1.w = dot(r1.zxy, gShadowVector.xyz);              // n·lightDir for shadow
+  outColor1.xyz = float3(0,0,0);
+  // 对象空间 TBN 已在分支内输出，skin 变换矩阵已在分支内输出
+  return;
+}
