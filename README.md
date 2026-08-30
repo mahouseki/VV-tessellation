@@ -1,4 +1,4 @@
-DOAX Venus Vacation 的原生建模精度较低。针对这一问题，此前已有开发者制作过高多边形模组，效果表现出色，但据我了解，这类现有模组与已有的服装模组兼容性不佳。为了打造一款兼容性更强的高多边形模组，我修改了渲染管线，通过加入外壳着色器（hull shader）和域着色器（domain shader），实现了游戏运行时实时将所有角色模型升级为高多边形效果。
+<img width="407" height="348" alt="origin arm" src="https://github.com/user-attachments/assets/996cb9f6-80f3-4f98-9064-3d631b97ddb9" />DOAX Venus Vacation 的原生建模精度较低。针对这一问题，此前已有开发者制作过高多边形模组，效果表现出色，但据我了解，这类现有模组与已有的服装模组兼容性不佳。为了打造一款兼容性更强的高多边形模组，我修改了渲染管线，通过加入外壳着色器（hull shader）和域着色器（domain shader），实现了游戏运行时实时将所有角色模型升级为高多边形效果。
 
 ## 模组特性
 
@@ -11,3 +11,10 @@ DOAX Venus Vacation 的原生建模精度较低。针对这一问题，此前已
 
 1. 传统第三方高多边形模组可针对每个角色模型进行定制化精细调整；本方案采用通用曲面细分算法，仅依托三角形面片本身的数据生成细分结果，最终模型细节质量略低于定制高模。
 2. 当前模组测试样本较少，若你在使用过程中遇到异常问题，欢迎提交反馈，我会尽可能进行修复。
+
+## 效果预览
+
+| 原版模型 | 曲面细分高模效果 |
+|---|---|
+| <img width="407" height="348" alt="origin arm" src="https://github.com/user-attachments/assets/58f47ad0-ac67-4d2c-9eb6-4c4c7a5dd860" /> | <img width="392" height="348" alt="High polygon arm" src="https://github.com/user-attachments/assets/25f5b397-a77f-4b6e-b3df-dabfe8ff413c" />|
+
