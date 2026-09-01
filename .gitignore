@@ -1,0 +1,2 @@
+# 3Dmigoto 编译生成的 shader 二进制，不入库
+*.bin
