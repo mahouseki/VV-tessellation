@@ -16,5 +16,5 @@ DOAX Venus Vacation 的原生建模精度较低。针对这一问题，此前已
 
 | 原版模型 | 曲面细分高模效果 |
 |---|---|
-| <img width="407" height="348" alt="origin arm" src="https://github.com/user-attachments/assets/58f47ad0-ac67-4d2c-9eb6-4c4c7a5dd860" /> | <img width="392" height="348" alt="High polygon arm" src="https://github.com/user-attachments/assets/25f5b397-a77f-4b6e-b3df-dabfe8ff413c" />|
+|<img width="407" height="348" alt="origin arm" src="https://github.com/user-attachments/assets/af89f161-fcbf-4333-9823-ce4c33fb209c" />|<img width="392" height="348" alt="High polygon arm" src="https://github.com/user-attachments/assets/4dfc6419-3c78-49e3-a647-4d388e2a7a78" />|
 
