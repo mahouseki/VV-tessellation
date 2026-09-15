@@ -237,10 +237,16 @@ void main(
     float3 skinTranslate_sk = r2.xyz + r7.xyz; // base + deltas
 
     // === 输出对象空间位置/法线/切线/副切线（PN-Triangle 在对象空间计算） ===
+    // 零长度法线/切线会让 normalize() 出 NaN（0 * rsqrt(0) = 0 * inf）。NaN 经 HS/DS
+    // 插值进 G-buffer 的 o1(法线)，延迟光照那一片就是黑块。脸部的眼窝/口腔内衬面片
+    // 就有这种退化输入，身体没有，所以只有少数人物中招。
+    // 原版 VS 是加 +1e-5 前置 epsilon 规避的，这里保持一致；两者都不能省。
+    float3 safeN = normal + float3(9.99999975e-06, 0, 0);
+    float3 safeT = tangent.xyz + float3(9.99999975e-06, 0, 0);
     outObjPos = float4(position.xyz, 1.0);
-    outObjNormal = float4(normalize(normal), 1.0);
-    outObjTangent = float4(normalize(tangent.xyz), tangent.w);
-    outObjBinormal = float4(cross(normalize(tangent.xyz), normalize(normal)) * tangent.w, 1.0);
+    outObjNormal = float4(normalize(safeN), 1.0);
+    outObjTangent = float4(normalize(safeT), tangent.w);
+    outObjBinormal = float4(cross(normalize(safeT), normalize(safeN)) * tangent.w, 1.0);
 
     // === 输出 skin 变换矩阵（DS 中用于对象空间→世界空间） ===
     outSkinRow0 = float4(r4.xyz, 0);
@@ -292,10 +298,16 @@ void main(
     // ==============================================
     // 【静态模型】输出对象空间位置/法线/切线 + gStaticTransformMatrix
     // ==============================================
+    // 零长度法线/切线会让 normalize() 出 NaN（0 * rsqrt(0) = 0 * inf）。NaN 经 HS/DS
+    // 插值进 G-buffer 的 o1(法线)，延迟光照那一片就是黑块。脸部的眼窝/口腔内衬面片
+    // 就有这种退化输入，身体没有，所以只有少数人物中招。
+    // 原版 VS 是加 +1e-5 前置 epsilon 规避的，这里保持一致；两者都不能省。
+    float3 safeN = normal + float3(9.99999975e-06, 0, 0);
+    float3 safeT = tangent.xyz + float3(9.99999975e-06, 0, 0);
     outObjPos = float4(position.xyz, 1.0);
-    outObjNormal = float4(normalize(normal), 1.0);
-    outObjTangent = float4(normalize(tangent.xyz), tangent.w);
-    outObjBinormal = float4(cross(normalize(tangent.xyz), normalize(normal)) * tangent.w, 1.0);
+    outObjNormal = float4(normalize(safeN), 1.0);
+    outObjTangent = float4(normalize(safeT), tangent.w);
+    outObjBinormal = float4(cross(normalize(safeT), normalize(safeN)) * tangent.w, 1.0);
 
     // skin变换 = gStaticTransformMatrix（DS中对所有细分顶点一致应用）
     outSkinRow0 = float4(gStaticTransformMatrix._m00_m01_m02, 0);
